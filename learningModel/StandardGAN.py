@@ -58,7 +58,7 @@ class StandardGANWoker():
         self.DOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
 
         self.GMetric = tensorflow.keras.metrics.BinaryCrossentropy(from_logits=True)
-        self.DMetric = tensorflow.keras.metrics.BinaryAccuracy()
+        self.DMetric = tensorflow.keras.metrics.BinaryAccuracy(threshold=0)
 
     def getDLoss(self, real_output, fake_output):
         real_loss = self.cross_entropy(

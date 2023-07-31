@@ -95,8 +95,8 @@ class CAAEWoker():
         self.DODOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
 
         self.AutoEncodeMetric = tensorflow.keras.metrics.MeanSquaredError()
-        self.DOEMetric = tensorflow.keras.metrics.BinaryAccuracy()
-        self.DODMetric = tensorflow.keras.metrics.BinaryAccuracy()
+        self.DOEMetric = tensorflow.keras.metrics.BinaryAccuracy(threshold=0)
+        self.DODMetric = tensorflow.keras.metrics.BinaryAccuracy(threshold=0)
 
     def getELoss(self, DOE_fake_output, DOD_fake_output, input_image, D_output):
         discriminator_loss = self.cross_entropy(
