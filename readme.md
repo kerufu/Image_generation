@@ -1,6 +1,7 @@
 A simple django website to gerarate pictures with GAN and classify pictures is expected
 
 Experiment on tarining GAN to work like auto encoter, comparing to CAAE
+
 Experiment on training with continuously increasing dataset
 
 In learning mode, show pictures randomly, user labels pictures. Train the models with mini batch learning at the end.
