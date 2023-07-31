@@ -1,4 +1,4 @@
-A simple django website to gerarate pictures with GAN and classify pictures is expected
+A simple django website to gerarate pictures with GAN and classify if pictures is expected
 
 Experiment on tarining GAN to work like auto encoter, comparing to CAAE
 
