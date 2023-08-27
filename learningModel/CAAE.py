@@ -20,8 +20,9 @@ class CrossAttention(tensorflow.keras.layers.Layer):
         self.k_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
         self.v_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
         self.mha = tensorflow.keras.layers.MultiHeadAttention(key_dim=self.key_dim, num_heads=self.num_heads, **kwargs)
-        self.layernorm = tensorflow.keras.layers.LayerNormalization()
+        self.attn_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
         self.add = tensorflow.keras.layers.Add()
+        self.layernorm = tensorflow.keras.layers.LayerNormalization()
 
     def call(self, x, context=None):
 
@@ -31,15 +32,17 @@ class CrossAttention(tensorflow.keras.layers.Layer):
             context = x
 
         q, k, v = self.q_layer(x), self.k_layer(context), self.v_layer(context)
-
         q = tensorflow.reshape(q, (-1, self.num_heads, self.key_dim))
         k = tensorflow.reshape(k, (-1, self.num_heads, self.key_dim))
         v = tensorflow.reshape(v, (-1, self.num_heads, self.key_dim))
 
         attn_output = self.mha(query=q, key=k, value=v)
         attn_output = tensorflow.reshape(attn_output, (-1, self.num_heads*self.key_dim))
+        attn_output = self.attn_layer(attn_output)
+
         x = self.add([x, attn_output])
         x = self.layernorm(x)
+        
         return x
         
 class Encoder(tensorflow.keras.Model):
