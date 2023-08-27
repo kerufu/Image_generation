@@ -1,6 +1,8 @@
-A simple django website to gerarate pictures with GAN and classify if pictures is expected
+A simple django website myP to gerarate pictures with GANs and classify if pictures is required type
 
-Experiment on training GAN to work like auto encoter, comparing to CAAE
+Experiment on training GAN to work like auto encoder
+
+Experiment on training CAAE with cross attention layer
 
 Experiment on training with continuously increasing dataset
 

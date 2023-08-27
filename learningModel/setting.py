@@ -1,7 +1,7 @@
 
-batchSize = 50
-imageSize = 256
-featureVectorLength = 16
+batchSize = 64
+imageSize = 64
+featureVectorLength = 1024
 
 StandardGANPath = [
     "learningModel/savedModel/StandardGAN/Generator",

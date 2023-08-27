@@ -8,6 +8,40 @@ from myP.settings import STATICFILES_DIRS
 from learningModel.setting import batchSize, imageSize, featureVectorLength, CAAEPath
 from learningModel.datasetManager import data_manager
 
+class CrossAttention(tensorflow.keras.layers.Layer):
+    def __init__(self, key_dim, num_heads, **kwargs):
+        super(CrossAttention, self).__init__()
+        
+        self.key_dim = key_dim
+        self.num_heads = num_heads
+
+        self.x_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.q_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.k_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.v_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.mha = tensorflow.keras.layers.MultiHeadAttention(key_dim=self.key_dim, num_heads=self.num_heads, **kwargs)
+        self.layernorm = tensorflow.keras.layers.LayerNormalization()
+        self.add = tensorflow.keras.layers.Add()
+
+    def call(self, x, context=None):
+
+        x = self.x_layer(x)
+
+        if context is None:
+            context = x
+
+        q, k, v = self.q_layer(x), self.k_layer(context), self.v_layer(context)
+
+        q = tensorflow.reshape(q, (-1, self.num_heads, self.key_dim))
+        k = tensorflow.reshape(k, (-1, self.num_heads, self.key_dim))
+        v = tensorflow.reshape(v, (-1, self.num_heads, self.key_dim))
+
+        attn_output = self.mha(query=q, key=k, value=v)
+        attn_output = tensorflow.reshape(attn_output, (-1, self.num_heads*self.key_dim))
+        x = self.add([x, attn_output])
+        x = self.layernorm(x)
+        return x
+        
 class Encoder(tensorflow.keras.Model):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -15,6 +49,7 @@ class Encoder(tensorflow.keras.Model):
             tensorflow.keras.layers.Conv2D(8, 2, activation='selu', padding='same'),
             tensorflow.keras.layers.Conv2D(16, 2, activation='selu', padding='same'),
             tensorflow.keras.layers.Flatten(),
+            CrossAttention(128, 8),
             tensorflow.keras.layers.Dense(featureVectorLength)
         ]
 
@@ -42,6 +77,7 @@ class Decoder(tensorflow.keras.Model):
     def __init__(self):
         super(Decoder, self).__init__()
         self.model = [
+            CrossAttention(128, 8),
             tensorflow.keras.layers.Dense(imageSize*imageSize, activation='selu'),
             tensorflow.keras.layers.Reshape((imageSize//4, imageSize//4, 16)),
             tensorflow.keras.layers.Conv2DTranspose(8, 2, strides=2, padding='same', activation='selu'),

@@ -83,9 +83,9 @@ def learnImage(request):
     def learnFunction():
         global isTraining
         isTraining = True
-        # classifierWoker.train()
-        standardGANWoker.train(100)
-        # caaeWoker.train()
+        classifierWoker.train()
+        standardGANWoker.train()
+        caaeWoker.train()
         isTraining = False
 
     if not isTraining:
