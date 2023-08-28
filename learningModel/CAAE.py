@@ -109,7 +109,8 @@ class DiscriminatorOnEncoder(tf.keras.Model):
     def __init__(self):
         super(DiscriminatorOnEncoder, self).__init__()
         self.model = [
-            tf.keras.layers.Dense(8, activation='selu'),
+            tf.keras.layers.Dense(256, activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Dense(64, activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
             tf.keras.layers.Dense(1)
         ]
 
@@ -124,7 +125,7 @@ class Decoder(tf.keras.Model):
         super(Decoder, self).__init__()
         self.model = [
             DenseCrossAttention(128, 8, 2048),
-            tf.keras.layers.Dense(imageSize*imageSize*4, activation='selu'),
+            tf.keras.layers.Dense(imageSize*imageSize*4, activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
             tf.keras.layers.Reshape((imageSize//4, imageSize//4, 256)),
             tf.keras.layers.Conv2DTranspose(128, 2, strides=2, padding='same', activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
             tf.keras.layers.Conv2DTranspose(64, 2, strides=2, padding='same', activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
@@ -142,7 +143,8 @@ class DiscriminatorOnDecoder(tf.keras.Model):
     def __init__(self):
         super(DiscriminatorOnDecoder, self).__init__()
         self.model = [
-            tf.keras.layers.Conv2D(8, 2, activation='selu'),
+            tf.keras.layers.Conv2D(256, 3, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2D(128, 2, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
             tf.keras.layers.Flatten(),
             tf.keras.layers.Dense(1)
         ]
