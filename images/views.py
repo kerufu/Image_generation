@@ -89,6 +89,7 @@ def learnImage(request):
         isTraining = False
 
     if not isTraining:
+        print("start training models")
         learnThread = threading.Thread(target=learnFunction)
         learnThread.start()
     return HttpResponseRedirect(reverse('index'))

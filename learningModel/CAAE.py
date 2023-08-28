@@ -1,6 +1,6 @@
 import time
 
-import tensorflow
+import tensorflow as tf
 import numpy
 import cv2
 
@@ -8,21 +8,22 @@ from myP.settings import STATICFILES_DIRS
 from learningModel.setting import batchSize, imageSize, featureVectorLength, CAAEPath
 from learningModel.datasetManager import data_manager
 
-class CrossAttention(tensorflow.keras.layers.Layer):
-    def __init__(self, key_dim, num_heads, **kwargs):
-        super(CrossAttention, self).__init__()
+class DenseCrossAttention(tf.keras.layers.Layer):
+    def __init__(self, key_dim, num_heads, units):
+        super(DenseCrossAttention, self).__init__()
         
         self.key_dim = key_dim
         self.num_heads = num_heads
 
-        self.x_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
-        self.q_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
-        self.k_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
-        self.v_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
-        self.mha = tensorflow.keras.layers.MultiHeadAttention(key_dim=self.key_dim, num_heads=self.num_heads, **kwargs)
-        self.attn_layer = tensorflow.keras.layers.Dense(self.key_dim*self.num_heads)
-        self.add = tensorflow.keras.layers.Add()
-        self.layernorm = tensorflow.keras.layers.LayerNormalization()
+        self.x_layer = tf.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.q_layer = tf.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.k_layer = tf.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.v_layer = tf.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.mha = tf.keras.layers.MultiHeadAttention(key_dim=self.key_dim, num_heads=self.num_heads)
+        self.attn_layer = tf.keras.layers.Dense(self.key_dim*self.num_heads)
+        self.add = tf.keras.layers.Add()
+        self.output_layer = tf.keras.layers.Dense(units)
+        self.layernorm = tf.keras.layers.LayerNormalization()
 
     def call(self, x, context=None):
 
@@ -32,12 +33,52 @@ class CrossAttention(tensorflow.keras.layers.Layer):
             context = x
 
         q, k, v = self.q_layer(x), self.k_layer(context), self.v_layer(context)
-        q = tensorflow.reshape(q, (-1, self.num_heads, self.key_dim))
-        k = tensorflow.reshape(k, (-1, self.num_heads, self.key_dim))
-        v = tensorflow.reshape(v, (-1, self.num_heads, self.key_dim))
+        q = tf.reshape(q, (-1, self.num_heads, self.key_dim))
+        k = tf.reshape(k, (-1, self.num_heads, self.key_dim))
+        v = tf.reshape(v, (-1, self.num_heads, self.key_dim))
 
         attn_output = self.mha(query=q, key=k, value=v)
-        attn_output = tensorflow.reshape(attn_output, (-1, self.num_heads*self.key_dim))
+        attn_output = tf.reshape(attn_output, (-1, self.num_heads*self.key_dim))
+        attn_output = self.attn_layer(attn_output)
+
+        x = self.add([x, attn_output])
+        x = self.output_layer(x)
+        x = self.layernorm(x)
+        
+        return x
+    
+class Conv2DCrossAttention(tf.keras.layers.Layer):
+    def __init__(self, key_dim, num_heads, filters, kernel_size, context_size=16, context_filters=16):
+        super(Conv2DCrossAttention, self).__init__()
+        
+        self.key_dim = key_dim
+        self.num_heads = num_heads
+
+        self.reshape_layers = [
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(context_size*context_size*context_filters),
+            tf.keras.layers.Reshape([-1, context_size, context_size, context_filters])
+        ]
+        self.q_layer = tf.keras.layers.Conv2D(filters, kernel_size, padding='same')
+        self.k_layer = tf.keras.layers.Conv2D(filters, kernel_size, padding='same')
+        self.v_layer = tf.keras.layers.Conv2D(filters, kernel_size, padding='same')
+        self.mha = tf.keras.layers.MultiHeadAttention(key_dim=key_dim, num_heads=num_heads, attention_axes=(1, 2))
+        self.attn_layer = tf.keras.layers.Conv2D(filters, kernel_size, padding='same')
+        self.add = tf.keras.layers.Add()
+        self.layernorm = tf.keras.layers.LayerNormalization()
+
+    def call(self, x, context=None):
+
+        if context is None:
+            context = x
+
+        if len(context.shape) < 4:
+            for rl in self.reshape_layers:
+                context = rl(context)
+
+        q, k, v = self.q_layer(x), self.k_layer(context), self.v_layer(context)
+
+        attn_output = self.mha(query=q, key=k, value=v)
         attn_output = self.attn_layer(attn_output)
 
         x = self.add([x, attn_output])
@@ -45,15 +86,17 @@ class CrossAttention(tensorflow.keras.layers.Layer):
         
         return x
         
-class Encoder(tensorflow.keras.Model):
+class Encoder(tf.keras.Model):
     def __init__(self):
         super(Encoder, self).__init__()
         self.model = [
-            tensorflow.keras.layers.Conv2D(8, 2, activation='selu', padding='same'),
-            tensorflow.keras.layers.Conv2D(16, 2, activation='selu', padding='same'),
-            tensorflow.keras.layers.Flatten(),
-            CrossAttention(128, 8),
-            tensorflow.keras.layers.Dense(featureVectorLength)
+            tf.keras.layers.Conv2D(32, 5, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2D(64, 3, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2D(128, 2, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2D(256, 2, activation='selu', padding='same', dilation_rate=2, kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Flatten(),
+            DenseCrossAttention(128, 8, 2048),
+            tf.keras.layers.Dense(featureVectorLength)
         ]
 
     def call(self, input):
@@ -62,12 +105,12 @@ class Encoder(tensorflow.keras.Model):
         return input
 
 
-class DiscriminatorOnEncoder(tensorflow.keras.Model):
+class DiscriminatorOnEncoder(tf.keras.Model):
     def __init__(self):
         super(DiscriminatorOnEncoder, self).__init__()
         self.model = [
-            tensorflow.keras.layers.Dense(8, activation='selu'),
-            tensorflow.keras.layers.Dense(1)
+            tf.keras.layers.Dense(8, activation='selu'),
+            tf.keras.layers.Dense(1)
         ]
 
     def call(self, input):
@@ -76,15 +119,17 @@ class DiscriminatorOnEncoder(tensorflow.keras.Model):
         return input
 
 
-class Decoder(tensorflow.keras.Model):
+class Decoder(tf.keras.Model):
     def __init__(self):
         super(Decoder, self).__init__()
         self.model = [
-            CrossAttention(128, 8),
-            tensorflow.keras.layers.Dense(imageSize*imageSize, activation='selu'),
-            tensorflow.keras.layers.Reshape((imageSize//4, imageSize//4, 16)),
-            tensorflow.keras.layers.Conv2DTranspose(8, 2, strides=2, padding='same', activation='selu'),
-            tensorflow.keras.layers.Conv2DTranspose(3, 2, strides=2, padding='same')
+            DenseCrossAttention(128, 8, 2048),
+            tf.keras.layers.Dense(imageSize*imageSize*4, activation='selu'),
+            tf.keras.layers.Reshape((imageSize//4, imageSize//4, 256)),
+            tf.keras.layers.Conv2DTranspose(128, 2, strides=2, padding='same', activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2DTranspose(64, 2, strides=2, padding='same', activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2DTranspose(32, 3, strides=2, padding='same', activation='selu', kernel_initializer=tf.keras.initializers.LecunNormal()),
+            tf.keras.layers.Conv2DTranspose(3, 5, strides=2, padding='same', kernel_initializer=tf.keras.initializers.LecunNormal())
         ]
 
     def call(self, input):
@@ -93,13 +138,13 @@ class Decoder(tensorflow.keras.Model):
         return input
 
 
-class DiscriminatorOnDecoder(tensorflow.keras.Model):
+class DiscriminatorOnDecoder(tf.keras.Model):
     def __init__(self):
         super(DiscriminatorOnDecoder, self).__init__()
         self.model = [
-            tensorflow.keras.layers.Conv2D(8, 2, activation='selu'),
-            tensorflow.keras.layers.Flatten(),
-            tensorflow.keras.layers.Dense(1)
+            tf.keras.layers.Conv2D(8, 2, activation='selu'),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(1)
         ]
 
     def call(self, input):
@@ -125,52 +170,52 @@ class CAAEWoker():
         except:
             print("CAAE weight not found")
         self.trainDataReady = False
-        self.cross_entropy = tensorflow.keras.losses.BinaryFocalCrossentropy(from_logits=True)
-        self.mse = tensorflow.keras.losses.MeanSquaredError()
+        self.cross_entropy = tf.keras.losses.BinaryFocalCrossentropy(from_logits=True)
+        self.mse = tf.keras.losses.MeanSquaredError()
 
-        self.EOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
-        self.DOEOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
-        self.DOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
-        self.DODOptimizer = tensorflow.keras.optimizers.Adam(clipnorm=1.0)
+        self.EOptimizer = tf.keras.optimizers.Adam(clipnorm=1.0)
+        self.DOEOptimizer = tf.keras.optimizers.Adam(clipnorm=1.0)
+        self.DOptimizer = tf.keras.optimizers.Adam(clipnorm=1.0)
+        self.DODOptimizer = tf.keras.optimizers.Adam(clipnorm=1.0)
 
-        self.AutoEncodeMetric = tensorflow.keras.metrics.MeanSquaredError()
-        self.DOEMetric = tensorflow.keras.metrics.BinaryAccuracy(threshold=0)
-        self.DODMetric = tensorflow.keras.metrics.BinaryAccuracy(threshold=0)
+        self.AutoEncodeMetric = tf.keras.metrics.MeanSquaredError()
+        self.DOEMetric = tf.keras.metrics.BinaryAccuracy(threshold=0)
+        self.DODMetric = tf.keras.metrics.BinaryAccuracy(threshold=0)
 
     def getELoss(self, DOE_fake_output, DOD_fake_output, input_image, D_output):
         discriminator_loss = self.cross_entropy(
-            tensorflow.ones_like(DOE_fake_output), DOE_fake_output)
+            tf.ones_like(DOE_fake_output), DOE_fake_output)
         discriminator_loss += self.cross_entropy(
-            tensorflow.ones_like(DOD_fake_output), DOD_fake_output)
+            tf.ones_like(DOD_fake_output), DOD_fake_output)
         image_loss = self.mse(input_image, D_output)
         return discriminator_loss + image_loss
 
     def getDOELoss(self, DOE_real_output, DOE_fake_output):
         real_loss = self.cross_entropy(
-            tensorflow.ones_like(DOE_real_output), DOE_real_output)
+            tf.ones_like(DOE_real_output), DOE_real_output)
         fake_loss = self.cross_entropy(
-            tensorflow.zeros_like(DOE_fake_output), DOE_fake_output)
+            tf.zeros_like(DOE_fake_output), DOE_fake_output)
         return real_loss + fake_loss
 
     def getDLoss(self, DOD_fake_output, input_image, D_output):
         discriminator_loss = self.cross_entropy(
-            tensorflow.ones_like(DOD_fake_output), DOD_fake_output)
+            tf.ones_like(DOD_fake_output), DOD_fake_output)
         image_loss = self.mse(input_image, D_output)
         return discriminator_loss + image_loss
 
     def getDODLoss(self, DOD_real_output, DOD_fake_output):
         real_loss = self.cross_entropy(
-            tensorflow.ones_like(DOD_real_output), DOD_real_output)
+            tf.ones_like(DOD_real_output), DOD_real_output)
         fake_loss = self.cross_entropy(
-            tensorflow.zeros_like(DOD_fake_output), DOD_fake_output)
+            tf.zeros_like(DOD_fake_output), DOD_fake_output)
         return real_loss + fake_loss
 
-    @tensorflow.function
+    @tf.function
     def train_step(self, images, conditions, AEIteration=1, DOEIteration=1, DODIteration=1):
         for _ in range(DOEIteration):
-            with tensorflow.GradientTape() as DOE_tape:
-                noise = tensorflow.random.uniform(
-                    [batchSize, featureVectorLength])
+            with tf.GradientTape() as DOE_tape:
+                noise = tf.random.uniform(
+                    [batchSize, featureVectorLength], minval=-1, maxval=1)
                 encoded_feature_vector = self.E(images, training=True)
                 DOE_real_output = self.DOE(noise, training=True)
                 DOE_fake_output = self.DOE(encoded_feature_vector, training=True)
@@ -180,12 +225,12 @@ class CAAEWoker():
                 DOE_loss, self.DOE.trainable_variables)
             self.DOEOptimizer.apply_gradients(
                 zip(gradients_of_DOE, self.DOE.trainable_variables))
-            self.DOEMetric.update_state(tensorflow.ones_like(DOE_real_output), DOE_real_output)
-            self.DOEMetric.update_state(tensorflow.zeros_like(DOE_fake_output), DOE_fake_output)
+            self.DOEMetric.update_state(tf.ones_like(DOE_real_output), DOE_real_output)
+            self.DOEMetric.update_state(tf.zeros_like(DOE_fake_output), DOE_fake_output)
         for _ in range(DODIteration):
-            with tensorflow.GradientTape() as DOD_tape:
+            with tf.GradientTape() as DOD_tape:
                 encoded_feature_vector = self.E(images, training=True)
-                conditional_encoded_feature_vector = tensorflow.concat(
+                conditional_encoded_feature_vector = tf.concat(
                     [encoded_feature_vector, conditions], 1)
                 decoded_images = self.D(
                     conditional_encoded_feature_vector, training=True)
@@ -199,17 +244,17 @@ class CAAEWoker():
                 zip(gradients_of_DOD, self.DOD.trainable_variables))
             
             self.DODMetric.update_state(
-                tensorflow.ones_like(DOD_real_output), DOD_real_output)
+                tf.ones_like(DOD_real_output), DOD_real_output)
             self.DODMetric.update_state(
-                tensorflow.zeros_like(DOD_fake_output), DOD_fake_output)
+                tf.zeros_like(DOD_fake_output), DOD_fake_output)
 
         for _ in range(AEIteration):
-            with tensorflow.GradientTape() as E_tape:
-                with tensorflow.GradientTape() as D_tape:
+            with tf.GradientTape() as E_tape:
+                with tf.GradientTape() as D_tape:
                     encoded_feature_vector = self.E(images, training=True)
                     DOE_fake_output = self.DOE(
                         encoded_feature_vector, training=True)
-                    conditional_encoded_feature_vector = tensorflow.concat(
+                    conditional_encoded_feature_vector = tf.concat(
                         [encoded_feature_vector, conditions], 1)
                     decoded_images = self.D(
                         conditional_encoded_feature_vector, training=True)
@@ -242,8 +287,8 @@ class CAAEWoker():
                 start = time.time()
                 for batch in self.trainData:
                     images, conditions = batch
-                    conditions = tensorflow.expand_dims(tensorflow.cast(
-                        conditions, dtype=tensorflow.float32), axis=1)
+                    conditions = tf.expand_dims(tf.cast(
+                        conditions, dtype=tf.float32), axis=1)
                     self.train_step(images, conditions)
                 print('Time for epoch {} is {} sec'.format(
                     epoch + 1, time.time()-start))
@@ -260,15 +305,15 @@ class CAAEWoker():
         data_manager.retrieveData()
         self.trainData, self.trainLabel = data_manager.getDataset()
         if len(self.trainData) > 0:
-            self.trainData = tensorflow.data.Dataset.from_tensor_slices(
+            self.trainData = tf.data.Dataset.from_tensor_slices(
                 (self.trainData, self.trainLabel)).shuffle(batchSize).batch(batchSize)
             self.trainDataReady = True
         else:
             print("no data")
 
     def generateImg(self, num=1, condition=1):
-        feature = tensorflow.random.uniform([num, featureVectorLength])
-        feature = tensorflow.concat([feature, [[condition]]], 1)
+        feature = tf.random.uniform([num, featureVectorLength], minval=-1, maxval=1)
+        feature = tf.concat([feature, [[condition]]], 1)
         img = self.D(feature)
         img = img * 255
         for index in range(num):
